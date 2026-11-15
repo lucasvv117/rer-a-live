@@ -113,3 +113,35 @@ button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--white), 0 0 0 
 .row .tag.w { background: var(--white); color: var(--fg-1); }
 .ellipsis { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .empty { padding: 24px; color: var(--fg-2); text-align: center; }
+
+/* ---------- Appels API ---------- */
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; cursor: pointer; user-select: none; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch-track { position: relative; width: 32px; height: 18px; border-radius: 999px; background: var(--border); transition: background 0.15s; flex: none; }
+.switch-track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 999px; background: var(--white); box-shadow: var(--shadow-sm); transition: transform 0.15s; }
+.switch input:checked + .switch-track { background: var(--fg-1); }
+.switch input:checked + .switch-track::after { transform: translateX(14px); }
+.switch input:focus-visible + .switch-track { box-shadow: 0 0 0 2px var(--white), 0 0 0 4px var(--fg-1); }
+
+.calls { margin-top: 24px; }
+.call-list { list-style: none; margin: 0; padding: 0; max-height: 360px; overflow-y: auto; }
+.call-list li { display: grid; grid-template-columns: auto auto 1fr auto; align-items: baseline; gap: 12px; padding: 10px 24px; border-top: 0.5px solid var(--border-soft); }
+.call-list li .dot { align-self: center; }
+.call-list li.ko { background: var(--tint-orange); }
+.call-time { font-size: 13px; font-weight: 600; }
+.call-title { display: block; font-weight: 500; }
+.call-meta { display: block; }
+@media (max-width: 640px) {
+  .call-list li { grid-template-columns: auto 1fr; padding: 10px 16px; }
+  .call-list li > :last-child { display: none; }
+  .call-list li > span:nth-child(3) { grid-column: 1 / -1; }
+}
+
+.toast { position: fixed; right: 24px; bottom: 24px; z-index: 50; width: min(420px, calc(100vw - 32px)); padding: 14px 16px; background: var(--white); border: 0.5px solid var(--border); border-left: 4px solid var(--success); border-radius: var(--radius-md); box-shadow: 0 4px 16px rgba(48, 48, 48, 0.16); font-size: 14px; animation: toast-in 0.2s ease-out; }
+.toast.ko { border-left-color: var(--warning); }
+.toast-close { border: 0; background: transparent; font-size: 18px; line-height: 1; padding: 2px 4px; cursor: pointer; color: var(--fg-2); border-radius: 4px; }
+.toast-close:hover { color: var(--fg-1); }
+@media (max-width: 640px) { .toast { right: 16px; bottom: 16px; } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+.call-list li:first-child { border-top: 0; }

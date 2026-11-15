@@ -8,11 +8,60 @@ import type { TrainsPayload } from "@/lib/prim";
 const POLL_MS = 30_000;
 const AUTO_STOP_MS = 15 * 60_000;
 
+const MAX_LOG = 20;
+const TOAST_MS = 6_000;
+const SHOW_CALLS_KEY = "rer-a:show-calls";
+
 type Filter = "all" | "E" | "W";
 type StopReason = "user" | "auto" | "hidden" | null;
 
+/** Un appel à /api/trains et ce qu’il a rapporté. */
+interface CallLog {
+  n: number;
+  at: number;
+  ok: boolean;
+  httpStatus: number | null;
+  durationMs: number;
+  error?: string;
+  sizeKb?: number;
+  /** En-tête x-vercel-cache : HIT, MISS, STALE… (absent en local). */
+  cache?: string | null;
+  journeys?: number;
+  onMap?: number;
+  east?: number;
+  west?: number;
+  late?: number;
+  /** Horodatage de la réponse PRIM (ResponseTimestamp SIRI). */
+  primAt?: number | null;
+  /** Les données PRIM ont-elles changé depuis l’appel réussi précédent ? */
+  fresh?: boolean;
+}
+
 const timeFmt = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris" });
 const hhmm = (ms: number) => timeFmt.format(new Date(ms));
+const secFmt = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Europe/Paris" });
+const hhmmss = (ms: number) => secFmt.format(new Date(ms));
+
+function cacheLabel(c: string | null | undefined) {
+  if (c === "HIT") return "servi par le cache Vercel";
+  if (c === "STALE") return "cache Vercel, rafraîchi en arrière-plan";
+  if (c === "MISS") return "calculé par le serveur";
+  return null;
+}
+
+function summaryLine(c: CallLog) {
+  return `${c.onMap} trains sur le plan · ${c.east} vers l’est · ${c.west} vers l’ouest · ${c.late} en retard`;
+}
+
+function metaLine(c: CallLog) {
+  const parts: string[] = [];
+  if (c.primAt) parts.push(`Données PRIM de ${hhmmss(c.primAt)}${c.fresh ? " (nouvelles)" : " (inchangées)"}`);
+  parts.push(`${c.journeys} courses reçues`);
+  const cache = cacheLabel(c.cache);
+  if (cache) parts.push(cache);
+  parts.push(`${c.durationMs} ms`, `${c.sizeKb} Ko`);
+  return parts.join(" · ");
+}
 const stName = (code: string | null) => (code ? STATIONS[code].name : "");
 
 function inLabel(ms: number) {
@@ -102,21 +151,81 @@ export default function LiveMap() {
   const [now, setNow] = useState(() => Date.now());
   const [selected, setSelected] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  const [calls, setCalls] = useState<CallLog[]>([]);
+  const [toast, setToast] = useState<CallLog | null>(null);
+  const [showCalls, setShowCalls] = useState(true);
   const startedAt = useRef(0);
+  const callCount = useRef(0);
+  const lastPrimAt = useRef<number | null>(null);
+
+  // Préférence mémorisée dans le navigateur (facultatif : tout marche sans).
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(SHOW_CALLS_KEY) === "0") setShowCalls(false);
+    } catch {}
+  }, []);
+  const toggleShowCalls = (v: boolean) => {
+    setShowCalls(v);
+    if (!v) setToast(null);
+    try {
+      localStorage.setItem(SHOW_CALLS_KEY, v ? "1" : "0");
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), TOAST_MS);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   const load = useCallback(async () => {
     setLoading(true);
+    const n = ++callCount.current;
+    const t0 = performance.now();
+    let log: CallLog;
+    let httpStatus: number | null = null;
     try {
       const res = await fetch("/api/trains", { cache: "no-store" });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? `Erreur ${res.status}`);
-      setData(json as TrainsPayload);
+      httpStatus = res.status;
+      const text = await res.text();
+      const durationMs = Math.round(performance.now() - t0);
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {}
+      if (!res.ok || !json) throw new Error(json?.error ?? `Erreur HTTP ${res.status}`);
+      const payload = json as TrainsPayload;
+      const at = Date.now();
+      const placedNow = placeAll(payload.trains, at);
+      const primAt = payload.responseTimestamp ? Date.parse(payload.responseTimestamp) : null;
+      log = {
+        n,
+        at,
+        ok: true,
+        httpStatus,
+        durationMs,
+        sizeKb: Math.round(new TextEncoder().encode(text).length / 1024),
+        cache: res.headers.get("x-vercel-cache"),
+        journeys: payload.trains.length,
+        onMap: placedNow.length,
+        east: placedNow.filter((p) => p.dir === "E").length,
+        west: placedNow.filter((p) => p.dir === "W").length,
+        late: placedNow.filter((p) => p.delayMin >= 2).length,
+        primAt,
+        fresh: primAt !== lastPrimAt.current,
+      };
+      lastPrimAt.current = primAt;
+      setData(payload);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erreur inconnue");
+      const message = e instanceof Error ? e.message : "Erreur inconnue";
+      log = { n, at: Date.now(), ok: false, httpStatus, durationMs: Math.round(performance.now() - t0), error: message };
+      setError(message);
     } finally {
       setLoading(false);
     }
+    setCalls((prev) => [log, ...prev].slice(0, MAX_LOG));
+    setToast(log);
   }, []);
 
   useEffect(() => {
@@ -194,6 +303,11 @@ export default function LiveMap() {
               </button>
             ))}
           </div>
+          <label className="switch">
+            <input type="checkbox" checked={showCalls} onChange={(e) => toggleShowCalls(e.target.checked)} />
+            <span className="switch-track" aria-hidden="true" />
+            Afficher les appels API
+          </label>
           <p className="status" style={{ margin: 0 }} aria-live="polite">
             <span className={`dot ${running ? "live" : "paused"}`} aria-hidden="true" />
             {statusText}
@@ -344,6 +458,49 @@ export default function LiveMap() {
           <p className="source muted">Source : Île-de-France Mobilités, API Prochains passages (requête globale)</p>
         </section>
       </div>
+
+      {showCalls && (
+        <section className="card calls" aria-label="Journal des appels API">
+          <div className="card-head">
+            <h2 className="card-title">Journal des appels API</h2>
+            <span className="muted small">{calls.length === 0 ? "Aucun appel pour l’instant" : `${callCount.current} appel${callCount.current > 1 ? "s" : ""} depuis l’ouverture de la page`}</span>
+          </div>
+          {calls.length === 0 ? (
+            <p className="empty">Chaque appel à l’API apparaîtra ici, avec un résumé des données reçues.</p>
+          ) : (
+            <ol className="call-list">
+              {calls.map((c) => (
+                <li key={c.n} className={c.ok ? "ok" : "ko"}>
+                  <span className={`dot ${c.ok ? "live" : "late"}`} aria-hidden="true" />
+                  <span className="tnum call-time">{hhmmss(c.at)}</span>
+                  <span style={{ minWidth: 0 }}>
+                    <span className="call-title">
+                      {c.ok ? summaryLine(c) : `Échec${c.httpStatus ? ` (HTTP ${c.httpStatus})` : ""} : ${c.error}`}
+                    </span>
+                    <span className="muted small call-meta">{c.ok ? metaLine(c) : `${c.durationMs} ms`}</span>
+                  </span>
+                  <span className="muted small tnum">n° {c.n}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
+
+      {showCalls && toast && (
+        <div className={`toast ${toast.ok ? "ok" : "ko"}`} role="status">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span className={`dot ${toast.ok ? "live" : "late"}`} aria-hidden="true" />
+            <strong>{toast.ok ? "Appel API réussi" : "Échec de l’appel API"}</strong>
+            <span className="muted small tnum" style={{ marginLeft: "auto" }}>n° {toast.n} · {hhmmss(toast.at)}</span>
+            <button type="button" className="toast-close" aria-label="Fermer" onClick={() => setToast(null)}>×</button>
+          </div>
+          <p style={{ margin: "6px 0 0" }}>
+            {toast.ok ? summaryLine(toast) : `${toast.error}${toast.httpStatus ? ` (HTTP ${toast.httpStatus})` : ""}`}
+          </p>
+          {toast.ok && <p className="muted small" style={{ margin: "4px 0 0" }}>{metaLine(toast)}</p>}
+        </div>
+      )}
     </main>
   );
 }
