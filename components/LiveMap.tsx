@@ -55,7 +55,11 @@ function summaryLine(c: CallLog) {
 
 function metaLine(c: CallLog) {
   const parts: string[] = [];
-  if (c.primAt) parts.push(`Données PRIM de ${hhmmss(c.primAt)}${c.fresh ? " (nouvelles)" : " (inchangées)"}`);
+  if (c.primAt) {
+    const ageMin = Math.floor((c.at - c.primAt) / 60_000);
+    const tag = ageMin >= 2 ? `anciennes, il y a ${ageMin} min` : c.fresh ? "nouvelles" : "inchangées";
+    parts.push(`Données PRIM de ${hhmmss(c.primAt)} (${tag})`);
+  }
   parts.push(`${c.journeys} courses reçues`);
   const cache = cacheLabel(c.cache);
   if (cache) parts.push(cache);

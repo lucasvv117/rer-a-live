@@ -11,8 +11,10 @@ desservi et le prochain, d’après les heures d’arrivée estimées. Ce n’es
 - Le suivi ne démarre que sur clic (« Lancer le suivi ») et s’arrête avec « Arrêter le suivi ».
 - Il s’arrête tout seul après 15 minutes, et dès que l’onglet n’est plus visible.
 - Pendant le suivi, le navigateur interroge `/api/trains` toutes les 30 secondes.
-- `/api/trains` est mis en cache 30 secondes côté serveur et CDN : tous les visiteurs partagent
-  au plus une requête PRIM toutes les 30 secondes.
+- `/api/trains` est mis en cache 30 secondes par le CDN Vercel : les visiteurs partagent
+  au plus une requête PRIM toutes les 30 secondes (par région Vercel).
+- Option « Afficher les appels API » : une notification et un journal résument chaque appel
+  (trains reçus, sens, retards, heure des données PRIM, cache, durée, taille).
 
 ## Lancer en local
 

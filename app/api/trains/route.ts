@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { RER_A_LINE_REF, toTrains } from "@/lib/prim";
 
-// Une seule requête PRIM toutes les 30 s au maximum, partagée entre tous les visiteurs.
+// Réponse mise en cache 30 s par le CDN Vercel : une requête PRIM toutes les 30 s au plus par région.
 const CACHE_SECONDS = 30;
 
 export async function GET() {
@@ -16,9 +16,12 @@ export async function GET() {
 
   let res: Response;
   try {
+    // Pas de cache de données Next ici : après une longue inactivité, il renvoyait la
+    // réponse périmée (parfois de la veille) le temps de se rafraîchir. Le partage entre
+    // visiteurs est assuré par le cache CDN (s-maxage ci-dessous).
     res = await fetch(url, {
       headers: { apiKey, accept: "application/json" },
-      next: { revalidate: CACHE_SECONDS },
+      cache: "no-store",
     });
   } catch {
     return NextResponse.json({ error: "API PRIM injoignable." }, { status: 502 });
